@@ -1,0 +1,70 @@
+version: "3"
+
+vars:
+  HOME_DIR:
+    sh: echo $HOME
+  GCC_BIN: 
+    sh: which gcc
+  CARGO_BIN: 
+    sh: which cargo
+  LIB_NAME: rust
+
+tasks:
+  install-requirements:
+    desc: "Install all tools needed to run Rust code"
+    cmds:
+      - curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh
+      # below command is needed to avoid terminal restart required in cargo first installation
+      - source "{{.HOME_DIR}}/.profile"
+      - cargo install --force cbindgen
+      - rustup update
+      - rustup component add rustfmt
+      - rustup component add clippy
+
+  run:
+    env:
+      RUST_BACKTRACE: full
+    desc: "Run clean and build tasks"
+    cmds:
+      - ./examples/bin/main
+    deps:
+      - clean
+      - build
+
+  clean:
+    desc: "Remove previous build"
+    cmds:
+      # below line is unuseful (so commented), because Rust knows what kind of files it has to rebuild,
+      # therefore if we delete the 'target' dir, Rust can't use cache and make build always start from 0
+      # - rm -rf ./target
+      - rm -f ./examples/bin/main # remove 'main' executable for C language
+      - mkdir -p ./examples/bin # create bin directory if not exists
+    ignore_error: true
+
+  build:
+    desc: "Build all needed files"
+
+    # Iexamples = include 'examples' directory in case of '.h' file is not in the same directory of '.c' file,
+    #   so in this case we can omit, but for reminder I leave it
+    # -L. -l... = Look in '.' directory to search the library in '...' link (l)  
+    cmds:
+      # create the lib files
+      - "{{.CARGO_BIN}} build --release"
+
+      # create 'main' executable for C language, based on main.c and dynamic Rust library (.so file)
+      - "{{.GCC_BIN}} ./examples/main.c -Iexamples -L. -l:target/release/lib{{.LIB_NAME}}.so -o ./examples/bin/main"
+
+      # create 'main' executable for C language, based on main.c and static Rust library (.a file)
+      # '-lpthread' is needed to solve the 'undefined reference to pthread_...' error
+      # '-Wl,--no-as-needed -ldl' is needed to solve the 'undefined reference to dlsym' error
+      # - "{{.GCC_BIN}} ./examples/main.c -Iexamples -L. -l:target/release/lib{{.LIB_NAME}}.a -o ./examples/bin/main -lpthread -Wl,--no-as-needed -ldl"
+
+  fmt:
+    desc: "Format source code"
+    cmds: 
+      - "{{.CARGO_BIN}} fmt"
+
+  lint:
+    desc: "Lint code"
+    cmds: 
+      - "{{.CARGO_BIN}} clippy"
